@@ -44,6 +44,7 @@ export const BRAZE_SDK_REQUIRED_PERMISSIONS = [
 ]
 
 export const ANDROID_BRAZE_XML_PATH = './android/app/src/main/res/values/braze.xml';
+export const ANDROID_FIREBASE_MESSAGING_SERVICE_CLASS_PATH = './android/app/src/main/java/com/FirebaseMessagingService/MyFirebaseMessagingService.java';
 export const BX_STR = "string";
 export const BX_INT = "integer";
 export const BX_BOOL = "bool";

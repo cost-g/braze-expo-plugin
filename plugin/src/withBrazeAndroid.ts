@@ -8,6 +8,7 @@ import {
   withAppBuildGradle,
   AndroidConfig,
   withGradleProperties,
+  withAndroidManifest,
   ExportedConfigWithProps
 } from "expo/config-plugins";
 
@@ -18,6 +19,7 @@ import {
   APP_LEVEL_GRADLE,
   BRAZE_SDK_REQUIRED_PERMISSIONS,
   ANDROID_BRAZE_XML_PATH,
+  ANDROID_FIREBASE_MESSAGING_SERVICE_CLASS_PATH,
   BX_STR,
   BX_INT,
   BX_BOOL,
@@ -78,6 +80,37 @@ async function writeBrazeXml(
   return true;
 }
 
+async function writeFirebaseMessagingServiceClass(projectRoot: string) {
+  const destinationPath = resolve(projectRoot, ANDROID_FIREBASE_MESSAGING_SERVICE_CLASS_PATH);
+
+  try {
+    let firebaseMessagingServiceClass = `package com.FirebaseMessagingService;\n`
+    firebaseMessagingServiceClass += `import com.google.firebase.messaging.FirebaseMessagingService;\n`
+    firebaseMessagingServiceClass += `import com.google.firebase.messaging.RemoteMessage;\n`
+    firebaseMessagingServiceClass += `import com.braze.push.BrazeFirebaseMessagingService;\n\n`
+    firebaseMessagingServiceClass += `public class MyFirebaseMessagingService extends FirebaseMessagingService {\n`
+    firebaseMessagingServiceClass += `  @Override\n`
+    firebaseMessagingServiceClass += `    public void onMessageReceived(RemoteMessage remoteMessage) {\n`
+    firebaseMessagingServiceClass += `        if (BrazeFirebaseMessagingService.handleBrazeRemoteMessage(this, remoteMessage)) {\n`
+    firebaseMessagingServiceClass += `            // This Remote Message originated from Braze and a push notification was displayed.\n`
+    firebaseMessagingServiceClass += `            // No further action is needed.\n`
+    firebaseMessagingServiceClass += `        } else {\n`
+    firebaseMessagingServiceClass += `            super.onMessageReceived(remoteMessage);\n`
+    firebaseMessagingServiceClass += `            // This Remote Message did not originate from Braze.\n`
+    firebaseMessagingServiceClass += `            // No action was taken and you can safely pass this Remote Message to other handlers.\n`
+    firebaseMessagingServiceClass += `        }\n`
+    firebaseMessagingServiceClass += `    }\n`
+    firebaseMessagingServiceClass += `}\n`
+
+    writeFileSync(destinationPath, firebaseMessagingServiceClass);
+  } catch (e) {
+    throw new Error(
+      `Cannot write MyFirebaseMessagingService.java file to ${destinationPath}.\n${e}`
+    );
+  }
+  return true;
+}
+
 async function appendContentsToConfig(newConfig: ExportedConfigWithProps<AndroidConfig.Paths.GradleProjectFile>, newContents: string) {
   let { contents } = newConfig.modResults;
   // Don't add this twice
@@ -88,6 +121,47 @@ async function appendContentsToConfig(newConfig: ExportedConfigWithProps<Android
   return newConfig;
 }
 
+function addServices(androidManifest) {
+  const { manifest } = androidManifest;
+
+  if (!Array.isArray(manifest["application"])) {
+    console.warn(
+      "withWordlLineIntentActivity: No application array in manifest?"
+    );
+    return androidManifest;
+  }
+
+  const application = manifest["application"].find(
+    (item) => item.$["android:name"] === ".MainApplication"
+  );
+  if (!application) {
+    console.warn("withWordlLineIntentActivity: No .MainApplication?");
+    return androidManifest;
+  }
+
+  const service = {};
+  service.$ = {
+    ...service.$,
+    ...{
+      "android.name": "com.FirebaseMessagingService.MyFirebaseMessagingService",
+      "android:exported": "false"
+    }
+  };
+
+  const action = {};
+  action.$ = {
+    ...action.$,
+    ...{
+      "android:name": "com.google.firebase.MESSAGING_EVENT",
+    },
+  };
+
+  const intent = { action };
+  service["intent-filter"].push(intent);
+
+  return androidManifest;
+}
+
 export const withAndroidBrazeSdk: ConfigPlugin<ConfigProps> = (config, props) => {
   config = AndroidConfig.Permissions.withPermissions(config, BRAZE_SDK_REQUIRED_PERMISSIONS);
 
@@ -95,6 +169,7 @@ export const withAndroidBrazeSdk: ConfigPlugin<ConfigProps> = (config, props) =>
     'android',
     async (config) => {
       await writeBrazeXml(config.modRequest.projectRoot, props);
+      await writeFirebaseMessagingServiceClass(config.modRequest.projectRoot);
       return config;
     },
   ]);
@@ -124,6 +199,12 @@ export const withAndroidBrazeSdk: ConfigPlugin<ConfigProps> = (config, props) =>
       },
     ]
     newProperties.map((gradleProperty) => newConfig.modResults.push(gradleProperty));
+    return newConfig;
+  });
+
+  // Add AndroidManifest services
+  config = withAndroidManifest(config, (newConfig) => {
+    newConfig.modResults = addServices(newConfig.modResults);
     return newConfig;
   });
 
